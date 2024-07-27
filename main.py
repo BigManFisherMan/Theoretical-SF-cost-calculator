@@ -1,4 +1,5 @@
 import tkinter as tk
+import math
 
 
 def validate_number(value_if_allowed, text):
@@ -20,7 +21,7 @@ def validate_number(value_if_allowed, text):
         return False  # Reject any non-integer input
 
 
-def getCost(curr, lvl, discount, options):
+def getCost(curr, lvl, mvp, options):
     """
     Calculates the cost of enhancing an item based on the current star level.
     Parameters:
@@ -34,19 +35,31 @@ def getCost(curr, lvl, discount, options):
     """
     if curr < 10:
         # For star levels 0-9
-        cost = 100 * round((lvl ** 3) * (curr + 1) / 2500 + 10) * discount
+        cost = 100 * round((lvl ** 3) * (curr + 1) / 2500 + 10)
     elif curr < 15:
         # For star levels 10-14
         divisors = (40000, 22000, 15000, 11000, 7500)
-        cost = 100 * round((lvl ** 3) * (curr + 1) ** 2.7 / divisors[curr - 10] + 10) * discount
+        cost = 100 * round((lvl ** 3) * (curr + 1) ** 2.7 / divisors[curr - 10] + 10)
     else:
         # For star levels 15+
-        cost = 100 * round((lvl ** 3) * (curr + 1) ** 2.7 / 20000 + 10) * discount
+        cost = 100 * round((lvl ** 3) * (curr + 1) ** 2.7 / 20000 + 10)
+
+    discount = 1
+
+    # Check for 30% off
+    if options[2]:
+        discount -= .3
+
+    # Apply mvp discount
+    if curr <= 15:
+        discount -= mvp
 
     # Apply safeguard cost doubling for stars 15 and 16 if safeguard is used
     if options[4] and curr in (15, 16):
         if not (options[0] and curr == 15):  # Don't double cost if 100% success is used for star 15
-            cost *= 2
+            discount += 1
+
+    cost *= discount
 
     return cost
 
@@ -71,7 +84,7 @@ def getSuccess(curr, odds, options):
 
     if options[4] and curr in (15, 16):
         # For stars 15 and 16, if safeguard is used
-        maintain, decrease = (maintain + boom, decrease) if maintain != 0 else (maintain, decrease + boom)
+        maintain = decrease = maintain + decrease + boom
         boom = 0  # Safeguard prevents booming
 
     if options[0] and curr in (5, 10, 15):
@@ -116,6 +129,8 @@ def calculate_stars(entry1, entry2, entry3, result_label, checkboxes, mvp_discou
         return
 
     total = [0] * 26  # Initialize total costs array
+    noBoomProbs = [1] * 26  # Keeps track of the probability not to boom at each step for distribution later
+    expectedBooms = [0] * 26  # Keeps track of the expected boom probabilities at each step to be summed
 
     # Base probabilities for success, maintain, decrease, and boom rates
     baseOdds = (
@@ -128,45 +143,59 @@ def calculate_stars(entry1, entry2, entry3, result_label, checkboxes, mvp_discou
     # Initialize variables for tracking costs
     lastFailDecrease, lastFailDestroy, twoCostAgo, lastCost = (0,) * 4
 
+    # Determine MVP discount rate
+    if mvp_discount == "MVP silver (3% off 1 to 16)":
+        mvp = 0.03
+    elif mvp_discount == "MVP gold (5% off 1 to 16)":
+        mvp = 0.05
+    elif mvp_discount == "MVP Diamond (10% off 1 to 16)":
+        mvp = 0.1
+    else:
+        mvp = 0
+
     # Calculate total cost to reach target star
     while currentStar < TargetStar:
-
-        # Determine MVP discount rate
-        if currentStar <= 15:
-            if mvp_discount == "MVP silver (3% off 1 to 16)":
-                mvp = 0.03
-            elif mvp_discount == "MVP gold (5% off 1 to 16)":
-                mvp = 0.05
-            elif mvp_discount == "MVP Diamond (10% off 1 to 16)":
-                mvp = 0.1
-            else:
-                mvp = 0
-        else:
-            mvp = 0
-
-        # Apply discount based on 30% off option and MVP discount
-        discount = 1 - mvp if not checkbox_values[2] else .7 * (1 - mvp)
-
-
-
+        # Set probabilities of each outcome and get the base cost
         success_rate, fail_maintain, fail_decrease, fail_destroy = getSuccess(currentStar, baseOdds, checkbox_values)
-        cost = getCost(currentStar, itemLevel, discount, checkbox_values)
+        cost = getCost(currentStar, itemLevel, mvp, checkbox_values)
 
+        # Start the calculation for each star based on the current star
         if currentStar < 15:
             total[currentStar + 1] = cost / success_rate
+
         elif currentStar == 15 or currentStar == 20:
             total[currentStar + 1] = (cost + fail_destroy * sum(total[13:currentStar + 1])) / success_rate
+            noBoomProbs[currentStar + 1] = success_rate / (success_rate + fail_destroy)
+            expectedBooms[currentStar + 1] = (fail_destroy * (1 + sum(expectedBooms[16:currentStar + 1]))) / success_rate
+
+            # Adjust the previous rates
             lastFailDecrease, lastFailDestroy, twoCostAgo, lastCost = fail_decrease, fail_destroy, lastCost, cost
+
         elif currentStar == 16 or currentStar == 21:
             total[currentStar + 1] = (cost + fail_decrease * total[currentStar] + fail_destroy *
                                       sum(total[13:currentStar + 1])) / success_rate
+            noBoomProbs[currentStar + 1] = success_rate / (success_rate + fail_destroy + fail_decrease * (1 - noBoomProbs[currentStar]))
+            expectedBooms[currentStar + 1] = (fail_destroy * (1 + sum(expectedBooms[16:currentStar + 1])) +
+                                              fail_decrease * expectedBooms[currentStar]) / success_rate
+
+            # Adjust the previous rates and two ago
             lastFailDecrease, lastFailDestroy, twoCostAgo, lastCost = fail_decrease, fail_destroy, lastCost, cost
+
         else:
             total[currentStar + 1] = (cost +
                                       fail_decrease * lastCost +
                                       fail_decrease * lastFailDecrease * (twoCostAgo + total[currentStar]) +
                                       (fail_decrease * lastFailDestroy + fail_destroy) * sum(total[13:currentStar + 1])
                                       ) / success_rate
+            noBoomProbs[currentStar + 1] = success_rate / (success_rate +
+                                                           fail_destroy +
+                                                           fail_decrease * lastFailDecrease * (1 - noBoomProbs[currentStar]) +
+                                                           fail_decrease * lastFailDestroy)
+            expectedBooms[currentStar + 1] = (fail_decrease * lastFailDecrease * expectedBooms[currentStar] +
+                                              (sum(expectedBooms[16:currentStar + 1]) + 1) * (fail_decrease * lastFailDestroy + fail_destroy)
+                                              ) / success_rate
+
+            # Adjust the previous rates and two ago
             lastFailDecrease, lastFailDestroy, twoCostAgo, lastCost = fail_decrease, fail_destroy, lastCost, cost
 
         if checkbox_values[1] and currentStar <= 10:
@@ -174,9 +203,13 @@ def calculate_stars(entry1, entry2, entry3, result_label, checkboxes, mvp_discou
         currentStar += 1
 
     answer = sum(total[StartStar + 1:TargetStar + 1])  # Sum the total costs to reach the target star level
+    totalExpectedBooms = sum(expectedBooms[StartStar + 1:TargetStar + 1])
+    mult = math.prod(noBoomProbs[StartStar + 1:TargetStar + 1])
+    print(f"{noBoomProbs}")
+    print(expectedBooms)
     result_label.config(
         # Display the result
-        text=f"The expected cost is: {round(answer):,}\nMVP Discount: {mvp_discount}\nCheckboxes: {checkbox_values}")
+        text=f"The expected cost is: {round(answer):,}\nExpected number of booms: {totalExpectedBooms}\nP(no Boom): {mult}")
 
 
 def main():
