@@ -61,6 +61,8 @@ def getCost(curr, lvl, mvp, options):
 
     cost *= discount
 
+    print(f"{curr}: {cost}")
+
     return cost
 
 
