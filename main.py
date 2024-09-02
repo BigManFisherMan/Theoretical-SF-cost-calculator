@@ -61,8 +61,6 @@ def getCost(curr, lvl, mvp, options):
 
     cost *= discount
 
-    print(f"{curr}: {cost}")
-
     return cost
 
 
@@ -207,8 +205,6 @@ def calculate_stars(entry1, entry2, entry3, result_label, checkboxes, mvp_discou
     answer = sum(total[StartStar + 1:TargetStar + 1])  # Sum the total costs to reach the target star level
     totalExpectedBooms = sum(expectedBooms[StartStar + 1:TargetStar + 1])
     mult = math.prod(noBoomProbs[StartStar + 1:TargetStar + 1])
-    print(f"{noBoomProbs}")
-    print(expectedBooms)
     result_label.config(
         # Display the result
         text=f"The expected cost is: {round(answer):,}\nExpected number of booms: {totalExpectedBooms}\nP(no Boom): {mult}")
